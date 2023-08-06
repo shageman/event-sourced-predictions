@@ -1,12 +1,17 @@
 
 require 'eventide/postgres'
 require 'consumer/postgres'
-require 'component_host'
+require 'try'
 
 require "saulabs/trueskill"
 
+require 'component_host'
+
+
 class RecordGameCreation
   include Messaging::Message
+
+  attribute :league_id, Numeric
 
   attribute :game_id, Numeric
   attribute :first_team_id, Numeric
@@ -18,13 +23,14 @@ end
 class GameCreationRecorded
   include Messaging::Message
 
+  attribute :league_id, Numeric
+
   attribute :game_id, Numeric
   attribute :first_team_id, Numeric
   attribute :second_team_id, Numeric
   attribute :winning_team, Numeric
   attribute :time, String
 
-  attribute :recorded_for_team_id, Numeric
   attribute :processed_time, String
 end
 
@@ -56,37 +62,77 @@ class TeamStrength
   end
 end
 
+class League
+  include Schema::DataStructure
+
+  attribute :league_id, Numeric
+  attribute :teams
+
+  def initialize
+    self.teams = {}
+  end
+
+  def []=(team_id, team_strength)
+    self.teams[team_id] = team_strength
+  end
+
+  def [](team_id)
+    self.teams[team_id] || TeamStrength.new
+  end
+end
+
+class League
+  module Transform
+    # When reading: Convert hash to League
+    def self.instance(raw_data)
+      League.build(raw_data)
+    end
+
+    # When writing: Convert League to hash
+    def self.raw_data(instance)
+      instance.to_h
+    end
+  end
+end
+
 class Projection
   include EntityProjection
 
-  entity_name :team_strength
+  entity_name :league
 
   apply GameCreationRecorded do |event|
-    team_strength.team_id = event.recorded_for_team_id
 
-    ### This obviously doesn't work
-    first_team = store.fetch(event.first_team_id)
-    second_team = store.fetch(event.second_team_id)
+    league.league_id = event.league_id
 
-    team1 = [Rating.new(first_team.mean, first_team.deviation, 1.0)]
-    team2 = [Rating.new(second_team.mean, second_team.deviation, 0.8)]
+    first_team = league[event.first_team_id]
+    second_team = league[event.second_team_id]
 
-    graph = FactorGraph.new(team1 => 1, team2 => 2)
+    team1 = [::Saulabs::TrueSkill::Rating.new(first_team.mean, first_team.deviation, 1.0)]
+    team2 = [::Saulabs::TrueSkill::Rating.new(second_team.mean, second_team.deviation, 1.0)]
+
+    result = event.winning_team == 1 ? [team1, team2] : [team2, team1]
+    graph = ::Saulabs::TrueSkill::FactorGraph.new(result, [1,2])
     graph.update_skills
 
-    if event.recorded_for_team_id == event.first_team_id
-      team_strength.update_to(first_team.mean, first_team.deviation)
-    else
-      team_strength.update_to(second_team.mean, second_team.deviation)
-    end
+    ts = TeamStrength.new
+    ts.team_id = event.first_team_id
+    ts.mean = team1.first.mean
+    ts.deviation = team1.first.deviation
+    league[event.first_team_id] = ts
+    
+    ts = TeamStrength.new
+    ts.team_id = event.second_team_id
+    ts.mean = team2.first.mean
+    ts.deviation = team2.first.deviation
+    league[event.second_team_id] = ts
   end
 end
 
 class Store
   include EntityStore
 
-  category :team_strength
-  entity TeamStrength
+  category :league
+  entity League
   projection Projection
   reader MessageStore::Postgres::Read
   snapshot EntitySnapshot::Postgres, interval: 5
@@ -106,17 +152,12 @@ class Handler
     Store.configure(self)
   end
 
-  category :team_strength
+  category :league
 
   handle RecordGameCreation do |command|
     result_event = GameCreationRecorded.follow(command)
     result_event.processed_time = clock.iso8601
-
-    result_event.recorded_for_team_id = command.first_team_id
-    write.(result_event, stream_name(command.first_team_id))
-
-    result_event.recorded_for_team_id = command.second_team_id
-    write.(result_event, stream_name(command.second_team_id))
+    write.(result_event, stream_name(command.league_id))
   end
 end
 
@@ -128,7 +169,7 @@ end
 
 module Component
   def self.call
-    team_strength_command_stream_name = 'team_strength:command'
-    TeamStrengthConsumer.start(team_strength_command_stream_name)
+    league_command_stream_name = 'league:command'
+    TeamStrengthConsumer.start(league_command_stream_name)
   end
 end
