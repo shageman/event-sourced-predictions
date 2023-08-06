@@ -64,18 +64,20 @@ class Projection
   apply GameCreationRecorded do |event|
     team_strength.team_id = event.recorded_for_team_id
 
+    ### This obviously doesn't work
+    first_team = store.fetch(event.first_team_id)
+    second_team = store.fetch(event.second_team_id)
+
+    team1 = [Rating.new(first_team.mean, first_team.deviation, 1.0)]
+    team2 = [Rating.new(second_team.mean, second_team.deviation, 0.8)]
+
+    graph = FactorGraph.new(team1 => 1, team2 => 2)
+    graph.update_skills
+
     if event.recorded_for_team_id == event.first_team_id
-      if event.winning_team == 1 
-        team_strength.update_to(team_strength.mean + 1, team_strength.deviation - 1)
-      else
-        team_strength.update_to(team_strength.mean - 1, team_strength.deviation - 1)
-      end
+      team_strength.update_to(first_team.mean, first_team.deviation)
     else
-      if event.winning_team == 2
-        team_strength.update_to(team_strength.mean + 1, team_strength.deviation - 1)
-      else
-        team_strength.update_to(team_strength.mean - 1, team_strength.deviation - 1)
-      end
+      team_strength.update_to(second_team.mean, second_team.deviation)
     end
   end
 end
