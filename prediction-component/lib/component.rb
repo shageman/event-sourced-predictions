@@ -29,55 +29,6 @@ class GameCreationRecorded
 end
 
 
-
-class RecordGameUpdate
-  include Messaging::Message
-
-  attribute :game_id, Numeric
-  attribute :first_team_id, Numeric
-  attribute :second_team_id, Numeric
-  attribute :winning_team, Numeric
-  attribute :time, String
-end
-
-class GameUpdateRecorded
-  include Messaging::Message
-
-  attribute :game_id, Numeric
-  attribute :first_team_id, Numeric
-  attribute :second_team_id, Numeric
-  attribute :winning_team, Numeric
-  attribute :time, String
-
-  attribute :processed_time, String
-end
-
-
-
-class RecordGameDeletion
-  include Messaging::Message
-
-  attribute :game_id, Numeric
-  attribute :first_team_id, Numeric
-  attribute :second_team_id, Numeric
-  attribute :winning_team, Numeric
-  attribute :time, String
-end
-
-class GameDeletionRecorded
-  include Messaging::Message
-
-  attribute :game_id, Numeric
-  attribute :first_team_id, Numeric
-  attribute :second_team_id, Numeric
-  attribute :winning_team, Numeric
-  attribute :time, String
-
-  attribute :processed_time, String
-end
-
-
-
 class TeamStrength
   include Schema::DataStructure
 
@@ -127,14 +78,6 @@ class Projection
       end
     end
   end
-
-  # apply GameUpdateRecorded do |event|
-  #   # TODO
-  # end
-
-  # apply GameDeletionRecorded do |event|
-  #   # TODO
-  # end
 end
 
 class Store
@@ -173,14 +116,6 @@ class Handler
     result_event.recorded_for_team_id = command.second_team_id
     write.(result_event, stream_name(command.second_team_id))
   end
-
-  # handle RecordGameUpdate do |event|
-  #   # TODO
-  # end
-
-  # handle RecordGameDeletion do |event|
-  #   # TODO
-  # end
 end
 
 class TeamStrengthConsumer
