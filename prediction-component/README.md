@@ -2,12 +2,12 @@
 
 ## What's currently working
 
-* defaults ratings to 1500 and 1000
-* increases ratings of the first team after that team wins a game
-* decreases ratings of the first team after that team looses a game
-* increases ratings of the first team after that team wins a game
-* decreases ratings of the first team after that team looses a game
-* increases mean for subsequent wins, but less and less so
+* defaults ratings to 1500 mean and 1000 deviation
+* increases rating mean of the first team after that team wins a game
+* decreases rating mean of the first team after that team looses a game
+* increases rating mean of the second team after that team wins a game
+* decreases rating mean of the second team after that team looses a game
+* increases rating mean for subsequent wins, but less and less so
 * works for many teams
 * protects against game recording duplication
 
