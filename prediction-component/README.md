@@ -7,10 +7,12 @@
 * decreases ratings of the first team after that team looses a game
 * increases ratings of the first team after that team wins a game
 * decreases ratings of the first team after that team looses a game
+* increases mean for subsequent wins, but less and less so
+* works for many teams
+* protects against game recording duplication
 
 ## Todo
 
-* use trueskill for rating increase / decrease
 * implement game deletions
 * implement game updates
 

@@ -7,6 +7,8 @@ require "saulabs/trueskill"
 
 require 'component_host'
 
+LEAGUE_STREAM_NAME = "league"
+GAME_STREAM_NAME = "game"
 
 class RecordGameCreation
   include Messaging::Message
@@ -31,6 +33,7 @@ class GameCreationRecorded
   attribute :winning_team, Numeric
   attribute :time, String
 
+  attribute :sequence, Integer
   attribute :processed_time, String
 end
 
@@ -67,6 +70,7 @@ class League
 
   attribute :league_id, Numeric
   attribute :teams
+  attribute :sequence, Integer
 
   def initialize
     self.teams = {}
@@ -78,6 +82,12 @@ class League
 
   def [](team_id)
     self.teams[team_id] || TeamStrength.new
+  end
+
+  def processed?(message_sequence)
+    return false if sequence.nil?
+
+    sequence >= message_sequence
   end
 end
 
@@ -138,7 +148,7 @@ class Store
   snapshot EntitySnapshot::Postgres, interval: 5
 end
 
-class Handler
+class LeagueHandler
   include Messaging::Handle
   include Messaging::StreamName
 
@@ -155,21 +165,72 @@ class Handler
   category :league
 
   handle RecordGameCreation do |command|
-    result_event = GameCreationRecorded.follow(command)
-    result_event.processed_time = clock.iso8601
-    write.(result_event, stream_name(command.league_id))
+    record_game_creation = RecordGameCreation.follow(command)
+
+    Try.(MessageStore::ExpectedVersion::Error) do
+      write.initial(record_game_creation, stream_name(command.game_id, "#{GAME_STREAM_NAME}"))
+    end
   end
 end
 
-class TeamStrengthConsumer
+class GamesHandler
+  include Log::Dependency
+  include Messaging::Handle
+  include Messaging::StreamName
+
+  dependency :write, Messaging::Postgres::Write
+  dependency :clock, Clock::UTC
+  dependency :store, Store
+
+  def configure
+    Messaging::Postgres::Write.configure(self)
+    Clock::UTC.configure(self)
+    Store.configure(self)
+  end
+
+  category :league
+
+  handle RecordGameCreation do |command|
+    league_id = command.league_id
+    league, version = store.fetch(league_id, include: :version)
+    sequence = command.metadata.global_position
+
+    if league.processed?(sequence)
+      logger.info(tag: :ignored) { "Command ignored (Command: #{league.message_type}, Account ID: #{league_id}, Account Sequence: #{account.sequence}, Deposit Sequence: #{sequence})" }
+      return
+    end
+
+    time = clock.iso8601
+
+    result_event = GameCreationRecorded.follow(command)
+    result_event.processed_time = time
+    result_event.sequence = sequence
+
+    stream_name = stream_name(league_id)
+
+    write.(result_event, stream_name, expected_version: version)
+  end
+end
+
+
+class LeagueConsumer
   include Consumer::Postgres
 
-  handler Handler
+  handler LeagueHandler
+end
+
+class GamesConsumer
+  include Consumer::Postgres
+
+  handler GamesHandler
 end
 
 module Component
   def self.call
-    league_command_stream_name = 'league:command'
-    TeamStrengthConsumer.start(league_command_stream_name)
+    league_command_stream_name = "#{LEAGUE_STREAM_NAME}:command"
+    LeagueConsumer.start(league_command_stream_name)
+
+    game_command_stream_name = "#{GAME_STREAM_NAME}"
+    GamesConsumer.start(game_command_stream_name)
   end
 end

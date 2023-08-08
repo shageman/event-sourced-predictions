@@ -1,18 +1,20 @@
 RSpec.describe "The system" do
-  let(:league_id) { rand(1_000_000_000) }
-  let(:command_stream_name) { "league:command-#{league_id}" }
-  let(:store) { Store.build }
+  def random_id
+    rand(1_000_000_000)
+  end
+
+  let!(:league_id) { random_id }
+  let!(:command_stream_name) { "league:command-#{league_id}" }
+  let!(:store) { Store.build }
 
   def startup_sleep
-    sleep 1
+    puts "Sleeping to wait for startup of server. Results are non-deterministic."
+    sleep 3
   end
 
   def process_sleep
-    sleep 0.3
-  end
-
-  def random_id
-    rand(1_000_000_000)
+    puts "Sleeping to wait for processing of messages. Results are non-deterministic."
+    sleep 3
   end
 
   def game(game_id: random_id, first_team_id: random_id, second_team_id: random_id, winning_team: 1)
@@ -46,9 +48,13 @@ RSpec.describe "The system" do
   end
 
   before(:context) do
+    `echo "\n\n\n\n>>>>>>>>>> NEW TEST RUN <<<<<<<<<<" >> log/test.log`
+    `date +"%Y-%m-%d %T" >> log/test.log`
     puts "*** Scrubbing message DB"
     `bundle exec mdb-recreate-db >> log/test.log`
-    
+    puts "*** Messages Status Before Tests"
+    puts `bundle exec mdb-print-messages`
+
     puts "*** Starting ComponentHost"
     fork { exec("ruby lib/service.rb >> log/test.log") }
     startup_sleep
@@ -75,8 +81,6 @@ RSpec.describe "The system" do
         Messaging::Postgres::Write.(game(first_team_id: team_id), command_stream_name)
         league = read_version_from_store(league_id, version: 0)
 
-        # league, version = store.fetch(league_id, include: :version)
-        # pp version
         expect(league[team_id].mean).to be_between(1501, 2500).inclusive
         expect(league[team_id].deviation).to be_between(0, 999).inclusive
       end
@@ -187,6 +191,19 @@ RSpec.describe "The system" do
         expect(league[first_team_id].mean < league[second_team_id].mean).to be_truthy
         expect(league[second_team_id].mean < league[third_team_id].mean).to be_truthy
         expect(league[third_team_id].mean < league[fourth_team_id].mean).to be_truthy
+      end
+
+      it "protects against command duplication" do
+        team_id = random_id
+        game = game(first_team_id: team_id)
+
+        Messaging::Postgres::Write.(game, command_stream_name)
+
+        Messaging::Postgres::Write.(game, command_stream_name)
+        sleep 2
+        _, version = store.fetch(league_id, include: :version)
+
+        expect(version).to eq 0
       end
     end
   end
