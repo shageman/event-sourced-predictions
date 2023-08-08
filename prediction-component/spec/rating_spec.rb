@@ -20,7 +20,8 @@ RSpec.describe "The system" do
     tries = 0
     while true do
       tries += 1
-      result, actual_version = store.fetch(id, include: :version)
+      league, actual_version = PredictionComponent::Client::FetchLeague.(id, include: :version)
+
       if version == actual_version
         break 
       elsif tries >= max_tries
@@ -29,7 +30,7 @@ RSpec.describe "The system" do
         sleep 0.05
       end
     end
-    result
+    league
   end
 
   before(:context) do
@@ -147,13 +148,57 @@ RSpec.describe "The system" do
       end
 
       it "protects against command duplication" do
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: 3)
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: 3)
+        game_id = random_id
+
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: game_id)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: game_id)
 
         process_sleep
-        _, version = store.fetch(league_id, include: :version)
+        _, version = PredictionComponent::Client::FetchLeague.(league_id, include: :version)
 
         expect(version).to eq 0
+      end
+
+      it "allows send theRecordGameCreation command via the client" do
+        expect { PredictionComponent::Client::RecordGameCreation.() }.to_not raise_exception
+      end
+
+      it "allows fetching a team (in a league) strength with and without version" do
+        team_id = random_id
+
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: team_id)
+        read_version_from_store(league_id, version: 0)
+
+        team_strength, version = PredictionComponent::Client::FetchTeamStrength.(league_id, team_id, include: :version)
+
+        expect(team_strength.mean).to be_between(1501, 2500).inclusive
+        expect(team_strength.deviation).to be_between(0, 999).inclusive
+        expect(version).to eq(0)
+
+        team_strength = PredictionComponent::Client::FetchTeamStrength.(league_id, team_id)
+
+        expect(team_strength.mean).to be_between(1501, 2500).inclusive
+        expect(team_strength.deviation).to be_between(0, 999).inclusive
+      end
+
+      it "allows fetching a league with and without version" do
+        first_team_id = random_id
+        second_team_id = random_id
+
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
+        read_version_from_store(league_id, version: 0)
+
+        league, version = PredictionComponent::Client::FetchLeague.(league_id, include: :version)
+
+        expect(league.teams.keys.sort).to eq([first_team_id, second_team_id].sort)
+        expect(league[first_team_id].mean).to be_between(1501, 2500).inclusive
+        expect(league[first_team_id].deviation).to be_between(0, 999).inclusive
+        expect(version).to eq(0)
+
+        league = PredictionComponent::Client::FetchLeague.(league_id)
+
+        expect(league[first_team_id].mean).to be_between(1501, 2500).inclusive
+        expect(league[first_team_id].deviation).to be_between(0, 999).inclusive
       end
     end
   end

@@ -25,9 +25,23 @@ module PredictionComponent
       end
 
       private
-      
+
       def self.random_id
         rand(1_000_000_000)
+      end
+    end
+
+    module FetchLeague
+      def self.call(league_id = random_id, inclusion = nil)
+        league, version = Store.build.fetch(league_id, include: :version)
+        inclusion == { include: :version } ? [league, version] : league
+      end
+    end
+
+    module FetchTeamStrength
+      def self.call(league_id = random_id, team_id = random_id, inclusion = nil)
+        league, version = FetchLeague.(league_id, inclusion)
+        inclusion == { include: :version } ? [league[team_id], version] : league[team_id]
       end
     end
   end
