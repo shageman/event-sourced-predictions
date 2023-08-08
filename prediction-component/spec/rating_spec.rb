@@ -4,7 +4,6 @@ RSpec.describe "The system" do
   end
 
   let!(:league_id) { random_id }
-  let!(:command_stream_name) { "league:command-#{league_id}" }
   let!(:store) { PredictionComponent::Store.build }
 
   def startup_sleep
@@ -15,20 +14,6 @@ RSpec.describe "The system" do
   def process_sleep
     puts "Sleeping to wait for processing of messages. Results are non-deterministic."
     sleep 3
-  end
-
-  def game(game_id: random_id, first_team_id: random_id, second_team_id: random_id, winning_team: 1)
-    game = PredictionComponent::RecordGameCreation.new
-
-    game.league_id = league_id
-    game.game_id = game_id
-    game.first_team_id = first_team_id
-    game.second_team_id = second_team_id
-    game.winning_team = winning_team
-
-    game.time = Time.now.iso8601
-
-    game
   end
 
   def read_version_from_store(id, version:, max_tries: 50)
@@ -78,7 +63,7 @@ RSpec.describe "The system" do
       it "increases ratings of the first team after that team wins a game" do
         team_id = random_id
 
-        Messaging::Postgres::Write.(game(first_team_id: team_id), command_stream_name)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: team_id)
         league = read_version_from_store(league_id, version: 0)
 
         expect(league[team_id].mean).to be_between(1501, 2500).inclusive
@@ -88,7 +73,7 @@ RSpec.describe "The system" do
       it "decreases ratings of the first team after that team looses a game" do
         team_id = random_id
 
-        Messaging::Postgres::Write.(game(first_team_id: team_id, winning_team: 2), command_stream_name)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: team_id, winning_team: 2)
         league = read_version_from_store(league_id, version: 0)
 
         expect(league[team_id].mean).to be_between(0, 1499).inclusive
@@ -98,7 +83,7 @@ RSpec.describe "The system" do
       it "increases ratings of the second team after that team wins a game" do
         team_id = random_id
 
-        Messaging::Postgres::Write.(game(second_team_id: team_id, winning_team: 2), command_stream_name)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, second_team_id: team_id, winning_team: 2)
         league = read_version_from_store(league_id, version: 0)
 
         expect(league[team_id].mean).to be_between(1501, 2500).inclusive
@@ -108,7 +93,7 @@ RSpec.describe "The system" do
       it "decreases ratings of the second team after that team looses a game" do
         team_id = random_id
 
-        Messaging::Postgres::Write.(game(second_team_id: team_id), command_stream_name)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, second_team_id: team_id)
         league = read_version_from_store(league_id, version: 0)
 
         expect(league[team_id].mean).to be_between(0, 1499).inclusive
@@ -122,32 +107,17 @@ RSpec.describe "The system" do
         league = read_version_from_store(league_id, version: :no_stream)
         mean_0 = league[first_team_id].mean
 
-        Messaging::Postgres::Write.(game(
-            first_team_id: first_team_id, 
-            second_team_id: second_team_id, 
-            winning_team: 1
-          ), command_stream_name
-        )
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
 
         league = read_version_from_store(league_id, version: 0)
         mean_1 = league[first_team_id].mean
 
-        Messaging::Postgres::Write.(game(
-            first_team_id: first_team_id, 
-            second_team_id: second_team_id, 
-            winning_team: 1
-          ), command_stream_name
-        )
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
 
         league = read_version_from_store(league_id, version: 1)
         mean_2 = league[first_team_id].mean
 
-        Messaging::Postgres::Write.(game(
-            first_team_id: first_team_id, 
-            second_team_id: second_team_id, 
-            winning_team: 1
-          ), command_stream_name
-        )
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
 
         league = read_version_from_store(league_id, version: 2)
         mean_3 = league[first_team_id].mean
@@ -165,26 +135,9 @@ RSpec.describe "The system" do
         third_team_id = random_id
         fourth_team_id = random_id
 
-        Messaging::Postgres::Write.(game(
-            first_team_id: first_team_id, 
-            second_team_id: second_team_id, 
-            winning_team: 2
-          ), command_stream_name
-        )
-
-        Messaging::Postgres::Write.(game(
-            first_team_id: second_team_id, 
-            second_team_id: third_team_id, 
-            winning_team: 2
-          ), command_stream_name
-        )
-
-        Messaging::Postgres::Write.(game(
-            first_team_id: third_team_id, 
-            second_team_id: fourth_team_id, 
-            winning_team: 2
-          ), command_stream_name
-        )
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id, winning_team: 2)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: second_team_id, second_team_id: third_team_id, winning_team: 2)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: third_team_id, second_team_id: fourth_team_id, winning_team: 2)
 
         league = read_version_from_store(league_id, version: 2)
 
@@ -194,13 +147,10 @@ RSpec.describe "The system" do
       end
 
       it "protects against command duplication" do
-        team_id = random_id
-        game = game(first_team_id: team_id)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: 3)
+        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: 3)
 
-        Messaging::Postgres::Write.(game, command_stream_name)
-
-        Messaging::Postgres::Write.(game, command_stream_name)
-        sleep 2
+        process_sleep
         _, version = store.fetch(league_id, include: :version)
 
         expect(version).to eq 0

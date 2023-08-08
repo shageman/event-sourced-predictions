@@ -1,5 +1,6 @@
 require 'pp'
 
+require_relative '../lib/prediction_component/client'
 require_relative '../lib/prediction_component/implementation'
 
 # ENV['CONSOLE_DEVICE'] ||= 'stdout'
