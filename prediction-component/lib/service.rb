@@ -1,6 +1,6 @@
-require_relative 'component'
+require_relative 'prediction_component/implementation'
 
 component_name = 'league-service'
 ComponentHost.start(component_name) do |host|
-  host.register(Component)
+  host.register(PredictionComponent::Component)
 end

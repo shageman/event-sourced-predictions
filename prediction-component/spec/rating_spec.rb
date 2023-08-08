@@ -5,7 +5,7 @@ RSpec.describe "The system" do
 
   let!(:league_id) { random_id }
   let!(:command_stream_name) { "league:command-#{league_id}" }
-  let!(:store) { Store.build }
+  let!(:store) { PredictionComponent::Store.build }
 
   def startup_sleep
     puts "Sleeping to wait for startup of server. Results are non-deterministic."
@@ -18,7 +18,7 @@ RSpec.describe "The system" do
   end
 
   def game(game_id: random_id, first_team_id: random_id, second_team_id: random_id, winning_team: 1)
-    game = RecordGameCreation.new
+    game = PredictionComponent::RecordGameCreation.new
 
     game.league_id = league_id
     game.game_id = game_id
