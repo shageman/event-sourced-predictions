@@ -3,7 +3,6 @@ RSpec.describe "The system" do
     rand(1_000_000_000)
   end
 
-  let!(:league_id) { random_id }
   let!(:store) { PredictionComponent::Store.build }
 
   def startup_sleep
@@ -20,7 +19,7 @@ RSpec.describe "The system" do
     tries = 0
     while true do
       tries += 1
-      league, actual_version = PredictionComponent::Client::FetchLeague.(id, include: :version)
+      stored_value, actual_version = PredictionComponent::Client::FetchTeamStrength.(id, include: :version)
 
       if version == actual_version
         break 
@@ -30,7 +29,7 @@ RSpec.describe "The system" do
         sleep 0.05
       end
     end
-    league
+    stored_value
   end
 
   before(:context) do
@@ -54,74 +53,74 @@ RSpec.describe "The system" do
     it "defaults ratings to 1500 and 1000" do
       team_id = random_id
 
-      league = read_version_from_store(league_id, version: :no_stream)
+      team_strength = read_version_from_store(team_id, version: :no_stream)
 
-      expect(league[team_id].mean).to eq 1500
-      expect(league[team_id].deviation).to eq 1000
+      expect(team_strength.mean).to eq 1500
+      expect(team_strength.deviation).to eq 1000
     end
 
     describe "effects of winning and loosing" do
       it "increases ratings of the first team after that team wins a game" do
         team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: team_id)
-        league = read_version_from_store(league_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: team_id)
+        team_strength = read_version_from_store(team_id, version: 0)
 
-        expect(league[team_id].mean).to be_between(1501, 2500).inclusive
-        expect(league[team_id].deviation).to be_between(0, 999).inclusive
+        expect(team_strength.mean).to be_between(1501, 2500).inclusive
+        expect(team_strength.deviation).to be_between(0, 999).inclusive
       end
 
       it "decreases ratings of the first team after that team looses a game" do
         team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: team_id, winning_team: 2)
-        league = read_version_from_store(league_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: team_id, winning_team: 2)
+        team_strength = read_version_from_store(team_id, version: 0)
 
-        expect(league[team_id].mean).to be_between(0, 1499).inclusive
-        expect(league[team_id].deviation).to be_between(0, 999).inclusive
+        expect(team_strength.mean).to be_between(0, 1499).inclusive
+        expect(team_strength.deviation).to be_between(0, 999).inclusive
       end
 
       it "increases ratings of the second team after that team wins a game" do
         team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, second_team_id: team_id, winning_team: 2)
-        league = read_version_from_store(league_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(second_team_id: team_id, winning_team: 2)
+        team_strength = read_version_from_store(team_id, version: 0)
 
-        expect(league[team_id].mean).to be_between(1501, 2500).inclusive
-        expect(league[team_id].deviation).to be_between(0, 999).inclusive
+        expect(team_strength.mean).to be_between(1501, 2500).inclusive
+        expect(team_strength.deviation).to be_between(0, 999).inclusive
       end
 
       it "decreases ratings of the second team after that team looses a game" do
         team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, second_team_id: team_id)
-        league = read_version_from_store(league_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(second_team_id: team_id)
+        team_strength = read_version_from_store(team_id, version: 0)
 
-        expect(league[team_id].mean).to be_between(0, 1499).inclusive
-        expect(league[team_id].deviation).to be_between(0, 999).inclusive
+        expect(team_strength.mean).to be_between(0, 1499).inclusive
+        expect(team_strength.deviation).to be_between(0, 999).inclusive
       end
 
       it "increases mean for subsequent wins, but less and less so" do
         first_team_id = random_id
         second_team_id = random_id
 
-        league = read_version_from_store(league_id, version: :no_stream)
-        mean_0 = league[first_team_id].mean
+        team_strength = read_version_from_store(first_team_id, version: :no_stream)
+        mean_0 = team_strength.mean
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: first_team_id, second_team_id: second_team_id)
 
-        league = read_version_from_store(league_id, version: 0)
-        mean_1 = league[first_team_id].mean
+        team_strength = read_version_from_store(first_team_id, version: 0)
+        mean_1 = team_strength.mean
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: first_team_id, second_team_id: second_team_id)
 
-        league = read_version_from_store(league_id, version: 1)
-        mean_2 = league[first_team_id].mean
+        team_strength = read_version_from_store(first_team_id, version: 1)
+        mean_2 = team_strength.mean
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: first_team_id, second_team_id: second_team_id)
 
-        league = read_version_from_store(league_id, version: 2)
-        mean_3 = league[first_team_id].mean
+        team_strength = read_version_from_store(first_team_id, version: 2)
+        mean_3 = team_strength.mean
 
         expect(mean_0 < mean_1).to be_truthy
         expect(mean_1 < mean_2).to be_truthy
@@ -136,69 +135,57 @@ RSpec.describe "The system" do
         third_team_id = random_id
         fourth_team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id, winning_team: 2)
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: second_team_id, second_team_id: third_team_id, winning_team: 2)
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: third_team_id, second_team_id: fourth_team_id, winning_team: 2)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: first_team_id, second_team_id: second_team_id, winning_team: 2)
+        #without the next line, the spec doesn't pass
+        second_team_strength_0 = read_version_from_store(second_team_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: second_team_id, second_team_id: third_team_id, winning_team: 2)
+        #without the next line, the spec doesn't pass
+        third_team_strength_0 = read_version_from_store(third_team_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: third_team_id, second_team_id: fourth_team_id, winning_team: 2)
 
-        league = read_version_from_store(league_id, version: 2)
+        first_team_strength = read_version_from_store(first_team_id, version: 0)
+        second_team_strength = read_version_from_store(second_team_id, version: 1)
+        third_team_strength = read_version_from_store(third_team_id, version: 1)
+        fourth_team_strength = read_version_from_store(fourth_team_id, version: 0)
 
-        expect(league[first_team_id].mean < league[second_team_id].mean).to be_truthy
-        expect(league[second_team_id].mean < league[third_team_id].mean).to be_truthy
-        expect(league[third_team_id].mean < league[fourth_team_id].mean).to be_truthy
+        expect(first_team_strength.mean < second_team_strength.mean).to be_truthy
+        expect(second_team_strength.mean < third_team_strength.mean).to be_truthy
+        expect(third_team_strength.mean < fourth_team_strength.mean).to be_truthy
       end
 
       it "protects against command duplication" do
         game_id = random_id
+        team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: game_id)
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, game_id: game_id)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: team_id, game_id: game_id)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: team_id, game_id: game_id)
 
         process_sleep
-        _, version = PredictionComponent::Client::FetchLeague.(league_id, include: :version)
+        _, version = PredictionComponent::Client::FetchTeamStrength.(team_id, include: :version)
 
         expect(version).to eq 0
       end
 
-      it "allows send theRecordGameCreation command via the client" do
+      it "allows send the RecordGameCreation command via the client" do
         expect { PredictionComponent::Client::RecordGameCreation.() }.to_not raise_exception
       end
 
-      it "allows fetching a team (in a league) strength with and without version" do
+      it "allows fetching a team strength with and without version" do
         team_id = random_id
 
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: team_id)
-        read_version_from_store(league_id, version: 0)
+        PredictionComponent::Client::RecordGameCreation.(first_team_id: team_id)
+        read_version_from_store(team_id, version: 0)
 
-        team_strength, version = PredictionComponent::Client::FetchTeamStrength.(league_id, team_id, include: :version)
+        team_strength, version = PredictionComponent::Client::FetchTeamStrength.(team_id, include: :version)
 
         expect(team_strength.mean).to be_between(1501, 2500).inclusive
         expect(team_strength.deviation).to be_between(0, 999).inclusive
         expect(version).to eq(0)
 
-        team_strength = PredictionComponent::Client::FetchTeamStrength.(league_id, team_id)
+        team_strength = PredictionComponent::Client::FetchTeamStrength.(team_id)
 
         expect(team_strength.mean).to be_between(1501, 2500).inclusive
         expect(team_strength.deviation).to be_between(0, 999).inclusive
-      end
-
-      it "allows fetching a league with and without version" do
-        first_team_id = random_id
-        second_team_id = random_id
-
-        PredictionComponent::Client::RecordGameCreation.(league_id: league_id, first_team_id: first_team_id, second_team_id: second_team_id)
-        read_version_from_store(league_id, version: 0)
-
-        league, version = PredictionComponent::Client::FetchLeague.(league_id, include: :version)
-
-        expect(league.teams.keys.sort).to eq([first_team_id, second_team_id].sort)
-        expect(league[first_team_id].mean).to be_between(1501, 2500).inclusive
-        expect(league[first_team_id].deviation).to be_between(0, 999).inclusive
-        expect(version).to eq(0)
-
-        league = PredictionComponent::Client::FetchLeague.(league_id)
-
-        expect(league[first_team_id].mean).to be_between(1501, 2500).inclusive
-        expect(league[first_team_id].deviation).to be_between(0, 999).inclusive
       end
     end
   end

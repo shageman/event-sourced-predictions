@@ -4,7 +4,6 @@ module PredictionComponent
   module Client
     module RecordGameCreation
       def self.call(
-        league_id: random_id, 
         game_id: random_id, 
         first_team_id: random_id, 
         second_team_id: random_id, 
@@ -12,7 +11,6 @@ module PredictionComponent
       )
         game = PredictionComponent::RecordGameCreation.new
 
-        game.league_id = league_id
         game.game_id = game_id
         game.first_team_id = first_team_id
         game.second_team_id = second_team_id
@@ -20,7 +18,7 @@ module PredictionComponent
 
         game.time = Time.now.iso8601
 
-        stream_name = Messaging::StreamName.command_stream_name(league_id, LEAGUE_STREAM_NAME)
+        stream_name = Messaging::StreamName.command_stream_name(game_id, GAME_STREAM_NAME)
         Messaging::Postgres::Write.(game, stream_name)
       end
 
@@ -31,17 +29,10 @@ module PredictionComponent
       end
     end
 
-    module FetchLeague
-      def self.call(league_id = random_id, inclusion = nil)
-        league, version = Store.build.fetch(league_id, include: :version)
-        inclusion == { include: :version } ? [league, version] : league
-      end
-    end
-
     module FetchTeamStrength
-      def self.call(league_id = random_id, team_id = random_id, inclusion = nil)
-        league, version = FetchLeague.(league_id, inclusion)
-        inclusion == { include: :version } ? [league[team_id], version] : league[team_id]
+      def self.call(team_id = random_id, inclusion = nil)
+        team, version = Store.build.fetch(team_id, include: :version)
+        inclusion == { include: :version } ? [team, version] : team
       end
     end
   end

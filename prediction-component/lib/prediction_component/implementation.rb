@@ -9,36 +9,56 @@ require 'component_host'
 
 
 module PredictionComponent
-  LEAGUE_STREAM_NAME = "league"
   GAME_STREAM_NAME = "game"
   
   class RecordGameCreation
     include Messaging::Message
 
-    attribute :league_id, Numeric
+    attribute :game_id, Numeric
+    attribute :first_team_id, Numeric
+    attribute :second_team_id, Numeric
+    attribute :winning_team, Numeric
+    attribute :time, String
+  end
+
+  class RecordGameCreationWithStrengths
+    include Messaging::Message
 
     attribute :game_id, Numeric
     attribute :first_team_id, Numeric
     attribute :second_team_id, Numeric
     attribute :winning_team, Numeric
     attribute :time, String
+
+    attribute :first_team_mean, Numeric
+    attribute :first_team_deviation, Numeric
+
+    attribute :second_team_mean, Numeric
+    attribute :second_team_deviation, Numeric
+
+    attribute :record_for, Numeric
   end
 
   class GameCreationRecorded
     include Messaging::Message
 
-    attribute :league_id, Numeric
-
     attribute :game_id, Numeric
     attribute :first_team_id, Numeric
     attribute :second_team_id, Numeric
     attribute :winning_team, Numeric
     attribute :time, String
 
+    attribute :first_team_mean, Numeric
+    attribute :first_team_deviation, Numeric
+
+    attribute :second_team_mean, Numeric
+    attribute :second_team_deviation, Numeric
+
+    attribute :record_for, Numeric
+
     attribute :sequence, Integer
     attribute :processed_time, String
   end
-
 
   class TeamStrength
     include Schema::DataStructure
@@ -46,10 +66,18 @@ module PredictionComponent
     attribute :team_id, Numeric
     attribute :mean, Numeric, default: 1500
     attribute :deviation, Numeric, default: 1000
+    attribute :sequence, Integer
 
-    def update_to(mean, deviation)
+    def update_to(team_id, mean, deviation)
+      self.team_id = team_id
       self.mean = mean
       self.deviation = deviation
+    end
+
+    def processed?(message_sequence)
+      return false if sequence.nil?
+
+      sequence >= message_sequence
     end
   end
 
@@ -67,111 +95,46 @@ module PredictionComponent
     end
   end
 
-  class League
-    include Schema::DataStructure
-
-    attribute :league_id, Numeric
-    attribute :teams
-    attribute :sequence, Integer
-
-    def initialize
-      self.teams = {}
-    end
-
-    def []=(team_id, team_strength)
-      self.teams[team_id] = team_strength
-    end
-
-    def [](team_id)
-      self.teams[team_id] || TeamStrength.new
-    end
-
-    def processed?(message_sequence)
-      return false if sequence.nil?
-
-      sequence >= message_sequence
-    end
-  end
-
-  class League
-    module Transform
-      # When reading: Convert hash to League
-      def self.instance(raw_data)
-        League.build(raw_data)
-      end
-
-      # When writing: Convert League to hash
-      def self.raw_data(instance)
-        instance.to_h
-      end
-    end
-  end
-
   class Projection
     include EntityProjection
 
-    entity_name :league
+    entity_name :team_strength
 
     apply GameCreationRecorded do |event|
+      # puts "GameCreationRecorded #{event.game_id}: #{event.first_team_id} vs #{event.second_team_id} (#{event.record_for})"
 
-      league.league_id = event.league_id
-
-      first_team = league[event.first_team_id]
-      second_team = league[event.second_team_id]
-
-      team1 = [::Saulabs::TrueSkill::Rating.new(first_team.mean, first_team.deviation, 1.0)]
-      team2 = [::Saulabs::TrueSkill::Rating.new(second_team.mean, second_team.deviation, 1.0)]
+      team1 = [::Saulabs::TrueSkill::Rating.new(event.first_team_mean, event.first_team_deviation, 1.0)]
+      team2 = [::Saulabs::TrueSkill::Rating.new(event.second_team_mean, event.second_team_deviation, 1.0)]
 
       result = event.winning_team == 1 ? [team1, team2] : [team2, team1]
       graph = ::Saulabs::TrueSkill::FactorGraph.new(result, [1,2])
       graph.update_skills
 
-      ts = TeamStrength.new
-      ts.team_id = event.first_team_id
-      ts.mean = team1.first.mean
-      ts.deviation = team1.first.deviation
-      league[event.first_team_id] = ts
+      ts1 = TeamStrength.new
+      ts1.team_id = event.first_team_id
+      ts1.mean = team1.first.mean
+      ts1.deviation = team1.first.deviation
       
-      ts = TeamStrength.new
-      ts.team_id = event.second_team_id
-      ts.mean = team2.first.mean
-      ts.deviation = team2.first.deviation
-      league[event.second_team_id] = ts
+      ts2 = TeamStrength.new
+      ts2.team_id = event.second_team_id
+      ts2.mean = team2.first.mean
+      ts2.deviation = team2.first.deviation
+
+      if event.record_for == 1
+        team_strength.update_to(ts1.team_id, ts1.mean, ts1.deviation)
+      else
+        team_strength.update_to(ts2.team_id, ts2.mean, ts2.deviation)
+      end
     end
   end
 
   class Store
     include EntityStore
 
-    category :league
-    entity League
+    category :team_strength
+    entity TeamStrength
     projection Projection
     reader MessageStore::Postgres::Read
-  end
-
-  class LeagueHandler
-    include Messaging::Handle
-    include Messaging::StreamName
-
-    dependency :write, Messaging::Postgres::Write
-    dependency :clock, Clock::UTC
-    dependency :store, Store
-
-    def configure
-      Messaging::Postgres::Write.configure(self)
-      Clock::UTC.configure(self)
-      Store.configure(self)
-    end
-
-    category :league
-
-    handle RecordGameCreation do |command|
-      record_game_creation = RecordGameCreation.follow(command)
-
-      Try.(MessageStore::ExpectedVersion::Error) do
-        write.initial(record_game_creation, stream_name(command.game_id, "#{GAME_STREAM_NAME}"))
-      end
-    end
   end
 
   class GamesHandler
@@ -189,15 +152,44 @@ module PredictionComponent
       Store.configure(self)
     end
 
-    category :league
+    category :team_strength
 
     handle RecordGameCreation do |command|
-      league_id = command.league_id
-      league, version = store.fetch(league_id, include: :version)
+      # puts "RecordGameCreation #{command.game_id}: #{command.first_team_id} vs #{command.second_team_id}"
+      record_game_creation = RecordGameCreationWithStrengths.follow(command)
+
+      first_team = store.fetch(command.first_team_id)
+      second_team = store.fetch(command.second_team_id)
+
+      record_game_creation.first_team_mean = first_team.mean
+      record_game_creation.first_team_deviation = first_team.deviation
+  
+      record_game_creation.second_team_mean = second_team.mean
+      record_game_creation.second_team_deviation = second_team.deviation
+  
+      record_game_creation.record_for = 2
+
+      Try.(MessageStore::ExpectedVersion::Error) do
+        write.initial(record_game_creation, stream_name("#{command.game_id}-#{record_game_creation.record_for}", "#{GAME_STREAM_NAME}"))
+      end
+
+      record_game_creation = record_game_creation.dup
+      record_game_creation.record_for = 1
+
+      Try.(MessageStore::ExpectedVersion::Error) do
+        write.initial(record_game_creation, stream_name("#{command.game_id}-#{record_game_creation.record_for}", "#{GAME_STREAM_NAME}"))
+      end
+    end
+
+    handle RecordGameCreationWithStrengths do |command|
+      team_id = command.record_for == 1 ? command.first_team_id : command.second_team_id
+      # puts "RecordGameCreationWithStrengths #{command.game_id}: #{command.first_team_id} vs #{command.second_team_id} (#{command.record_for})"
+
+      team, version = store.fetch(team_id, include: :version)
       sequence = command.metadata.global_position
 
-      if league.processed?(sequence)
-        logger.info(tag: :ignored) { "Command ignored (Command: #{league.message_type}, Account ID: #{league_id}, Account Sequence: #{account.sequence}, Deposit Sequence: #{sequence})" }
+      if team.processed?(sequence)
+        logger.info(tag: :ignored) { "Command ignored (Command: #{team.message_type}, Account ID: #{team_id}, Account Sequence: #{team.sequence}, Deposit Sequence: #{sequence})" }
         return
       end
 
@@ -207,17 +199,10 @@ module PredictionComponent
       result_event.processed_time = time
       result_event.sequence = sequence
 
-      stream_name = stream_name(league_id)
+      stream_name = stream_name(team_id)
 
       write.(result_event, stream_name, expected_version: version)
     end
-  end
-
-
-  class LeagueConsumer
-    include Consumer::Postgres
-
-    handler LeagueHandler
   end
 
   class GamesConsumer
@@ -228,8 +213,8 @@ module PredictionComponent
 
   module Component
     def self.call
-      league_command_stream_name = "#{LEAGUE_STREAM_NAME}:command"
-      LeagueConsumer.start(league_command_stream_name)
+      game_command_stream_name = "#{GAME_STREAM_NAME}:command"
+      GamesConsumer.start(game_command_stream_name)
 
       game_command_stream_name = "#{GAME_STREAM_NAME}"
       GamesConsumer.start(game_command_stream_name)
