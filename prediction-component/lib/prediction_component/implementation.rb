@@ -170,14 +170,14 @@ module PredictionComponent
       record_game_creation.record_for = 2
 
       Try.(MessageStore::ExpectedVersion::Error) do
-        write.initial(record_game_creation, stream_name("#{command.game_id}-#{record_game_creation.record_for}", "#{GAME_STREAM_NAME}"))
+        write.initial(record_game_creation, stream_name("#{command.game_id}-#{record_game_creation.record_for}", "#{GAME_STREAM_NAME}:command"))
       end
 
       record_game_creation = record_game_creation.dup
       record_game_creation.record_for = 1
 
       Try.(MessageStore::ExpectedVersion::Error) do
-        write.initial(record_game_creation, stream_name("#{command.game_id}-#{record_game_creation.record_for}", "#{GAME_STREAM_NAME}"))
+        write.initial(record_game_creation, stream_name("#{command.game_id}-#{record_game_creation.record_for}", "#{GAME_STREAM_NAME}:command"))
       end
     end
 
@@ -214,9 +214,6 @@ module PredictionComponent
   module Component
     def self.call
       game_command_stream_name = "#{GAME_STREAM_NAME}:command"
-      GamesConsumer.start(game_command_stream_name)
-
-      game_command_stream_name = "#{GAME_STREAM_NAME}"
       GamesConsumer.start(game_command_stream_name)
     end
   end
